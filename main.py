@@ -91,14 +91,16 @@ def check_pid(pid):
 
 class PlayerData:
     
-    def __init__(self, player_id, hp_offset, tension_offset, burst_offset, dist_offset, char_offset):
+    def __init__(self, player_id, hp_offset, lives_offset, tension_offset, burst_offset, dist_offset, char_offset):
         self.player_id = player_id
         self.hp_offset = int(hp_offset, 0)
+        self.lives_offset = int(lives_offset, 0)
         self.tension_offset = int(tension_offset, 0)
         self.burst_offset = int(burst_offset, 0)
         self.dist_offset = int(dist_offset, 0)
         self.char_offset = int(char_offset, 0)
         self.hp = -1
+        self.lives_lost = -1
         self.tension = -1
         self.burst = -1
         self.dist = -1
@@ -110,6 +112,7 @@ class PlayerData:
     def updateData(self, processHandle, base, pid):
         if(check_pid(pid)):
             self.hp = GetValueFromAddress(processHandle, base + self.hp_offset, isFloat=True)
+            self.lives_lost = GetValueFromAddress(processHandle, base + self.lives_offset)
             self.tension = GetValueFromAddress(processHandle, base + self.tension_offset, isFloat=True)
             self.burst = GetValueFromAddress(processHandle, base + self.burst_offset, isFloat=True)
             self.dist = GetValueFromAddress(processHandle, base + self.dist_offset, isFloat=True)
@@ -139,16 +142,6 @@ class GameState:
         self.opponent_last_move = "n/a"
         #self.state = "" # ground, air, wake-up, hit-stun (Idk some more as well maybe)
         # ignore for now
-    
-    #def createSnapshot(self, p1_data, p2_data):
-    #    # copy self to file
-    #    with open(str(p1_data.char) + '.csv', 'w', newline='') as csvfile:
-    #       writer = csv.writer(csvfile, delimiter = ' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-    #       writer.writerow([self.p1_gamestate.frame_adv, self.p1_gamestate.dist, self.p1_gamestate.pos_adv, self.p1_gamestate.player_last_move, self.p1_gamestate.opponent_last_move, self.p1_gamestate.action])
-    #    with open(str(p2_data.char) + '.csv', 'w', newline='') as csvfile:
-    #        writer = csv.writer(csvfile, delimiter = ' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-    #        writer.writerow([self.p2_gamestate.frame_adv, self.p2_gamestate.dist, self.p2_gamestate.pos_adv, self.p2_gamestate.player_last_move, self.p2_gamestate.opponent_last_move, self.p2_gamestate.action])
-    #    return 0
 
     def updateData(self, p1_data, p2_data):
         playerData = None
@@ -223,103 +216,12 @@ class GameState:
                     #    self.player_last_move = "n/a"
             except KeyError:
                 print("oops")
-        
-
-
-
-        # if (playerData.actionChange == 1):
-        #     try:
-        #         player_action = config_player[str(abs(playerData.action))]
-        #         player_prev_action = config_player[str(abs(playerData.prev_action))]
-        #         opponent_action = config_opponent[str(abs(opponentData.action))]
-        #         opponent_prev_action = config_player[str(abs(opponentData.prev_action))]
-        #         if (player_action['name'] == "block"):
-        #             if (self.opponent_last_move == "n/a"):
-        #                 self.frame_adv = 0
-        #             else:
-        #                 opponent_last = config_opponent[str(abs(self.opponent_last_move))]
-        #                 self.frame_adv = str(int(opponent_last['adv']) * (-1))
-        #             self.opponent_last_move = opponentData.action
-        #             #opponent_last = config_opponent[str(abs(self.opponent_last_move))]
-        #             #if (adv == "n/a"):
-        #             #    # i.e. happens if opponent attacked, and then shimmied while player is still blocking.
-        #             #    self.frame_adv = 0
-        #             #else:
-        #             #    self.frame_adv = str(int(opponent_prev_action['adv']) * (-1))
-        #             #self.opponent_last_move = opponentData.action
-        #         else:
-        #             #if (self.opponent_last_move == "n/a"):
-        #             #    self.frame_adv = 0
-        #             #else:
-        #             #    opponent_last = config_opponent[str(abs(self.opponent_last_move))]
-        #             #    self.frame_adv = str(int(opponent_last['adv']) * (-1))
-        #             if (self.opponent_last_move == "n/a"):
-        #                 self.frame_adv = 0
-        #             else:
-        #                 opponent_last = config_opponent[str(abs(self.opponent_last_move))]
-        #                 self.frame_adv = str(int(opponent_last['adv']) * (-1))
-        #             self.opponent_last_move = "n/a"
-        #             #playerData.actionChange = 0
-        #         if (opponent_action['name'] == "block"):
-        #             if (self.player_last_move == "n/a"):
-        #                 self.frame_adv = 0
-        #             else:
-        #                 player_last = config_player[str(abs(self.player_last_move))]
-        #                 self.frame_adv = str(int(player_last['adv']))
-        #             self.player_last_move = playerData.action
-        #             playerData.actionChange = 0
-        #         else:
-        #             #if (player_last_move == "n/a"):
-        #             #    self.frame_adv = 0
-        #             #else:
-        #             #    player_last = config_player[str(abs(self.player_last_move))]
-        #             #    self.frame_adv = str(int(player_last['adv']))
-        #             if (self.player_last_move == "n/a"):
-        #                 self.frame_adv = 0
-        #             else:
-        #                 player_last = config_player[str(abs(self.player_last_move))]
-        #                 self.frame_adv = str(int(player_last['adv']))
-        #             self.player_last_move = "n/a"
-        #     except KeyError:
-        #         print("oops")
-        #try:
-        #    self.player_last_move = config_player[str(abs(playerData.prev_action))]['name']
-        #except KeyError:
-        #    self.player_last_move = "n/a"
-        # try:
-        #     self.opponent_last_move = config_opponent[str(abs(opponentData.prev_action))]['name']
-        # except KeyError:
-        #     self.player_last_move = "n/a"
-        # try:
-        #     player_action = config_player[str(abs(playerData.action))]
-        #     player_prev_action = config_player[str(abs(playerData.prev_action))]
-        #     opponent_action = config_opponent[str(abs(opponentData.action))]
-        #     opponent_prev_action = config_player[str(abs(opponentData.prev_action))]
-        #     if (player_action['name'] == "block"):
-        #         self.frame_adv = str(int(opponent_action['adv']) * (-1))
-        #         #self.opponent_last_move = opponent_action['name']
-        #     elif (opponent_action['name'] == "block"):
-        #         self.frame_adv = player_action['adv']
-        #         #self.player_last_move = player_action['name']
-        #     if (playerData.snapshot == 1):
-        #         with open(str(playerData.char) + '.csv', 'a', newline='') as csvfile:
-        #             writer = csv.writer(csvfile, delimiter = ' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-        #             writer.writerow([self.frame_adv, self.dist, self.pos_adv, self.player_last_move, self.opponent_last_move, player_action['name']])
-        #         playerData.snapshot = 0
-        # except KeyError:
-        #     self.frame_adv = -100
-        # take frame data of prev_action ?
-        # if (P1Data.action == xxx)
-        # elif (P2Data.action == xxx)
-        # update frame_adv
-
-
 
 def main():
     config = configparser.ConfigParser()
     config.read('addresses.ini')
-    p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
-    p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
+    p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
+    p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
     gamestate = GameState(1)
 
     
@@ -352,6 +254,7 @@ def main():
             print("Tension: " + str(round((100 * p1_pd.tension), 1)))
             print("Burst: " + str(round((100 * p1_pd.burst), 1)))
             print("Distance (left side): " + str(round(p1_pd.dist, 2)))
+            print("Lives lost: " + str(p1_pd.lives_lost))
             if (p1_pd.char < 18):
                 print("Character: " + characters[p1_pd.char])
             try:
@@ -365,6 +268,7 @@ def main():
             print("Tension: " + str(round((100 * p2_pd.tension), 1)))
             print("Burst: " + str(round((100 * p2_pd.burst), 1)))
             print("Distance (left side): " + str(round(p2_pd.dist, 2)))
+            print("Lives lost: " + str(p2_pd.lives_lost))
             if (p2_pd.char < 18):
                 print("Character: " + characters[p2_pd.char])
             try:
@@ -380,6 +284,7 @@ def main():
             print("Frame advantage: " + str(gamestate.frame_adv))
             print("Player last move: " + str(gamestate.player_last_move))
             print("Opponent last move: " + str(gamestate.opponent_last_move))
+            print("Distance between characters: " + str(abs(p1_pd.dist - p2_pd.dist)))
         old = {p1_pd.hp, p1_pd.tension, p1_pd.burst, p1_pd.char, p2_pd.hp, p2_pd.tension, p2_pd.burst, p2_pd.dist, p2_pd.char}
 
     return 0
