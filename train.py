@@ -9,48 +9,41 @@ import csv
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import load_iris
 from sklearn.neighbors import KNeighborsClassifier as knn
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import train_test_split
+
 import sys
 
-# in reality you would need 2 char ids, one for player and one for opponent
-# but rn we're assuming both the player/opp's character are the same
-
 def main(): # give character id of p1 and p2 (take as command line arg)
-    characters = ["SOL", "KY", "MAY", "AXL", "CHIPP", "POT", "FAUST", "MILLIA", "ZATO", "RAM", "LEO", "NAGO", 
-    "GIO", "ANJI", "INO", "GLDS", "JACKO", "CHAOS"]
-    #raw_data = pd.read_csv(characters[sys.argv[1:][0]] + "_vs_" + characters[sys.argv[1:][1]] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
-    raw_data = pd.read_csv(csys.argv[1:][0] + "_vs_" + sys.argv[1:][1] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
+    codes = ["SOL", "KY", "MAY", "AXL", "CHIPP", "POT", "FAUST", "MILLIA", "ZATO", "RAM", "LEO", "NAGO", 
+    "GIO", "ANJI", "INO", "GOLD", "JACKO", "CHAOS"]
+    raw_data = pd.read_csv(codes[int(sys.argv[1:][0])] + "_vs_" + codes[int(sys.argv[1:][1])] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
+    
+    #raw_data = pd.read_csv(sys.argv[1:][0] + "_vs_" + sys.argv[1:][1] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
     X = raw_data.iloc[:, :-1].to_numpy()
     y = raw_data.iloc[:, -1].to_numpy()
     #print(X)
     #print(y)
-    classifier = LogisticRegression(random_state=0, max_iter=100000).fit(X, y)
-    print("prediction")
+    X_train, X_calib, y_train, y_calib = train_test_split(X, y, random_state=42)
+
+    base_clf = LogisticRegression(random_state=0, max_iter=100000).fit(X_train, y_train)
+    calibrated_clf = CalibratedClassifierCV(base_estimator=base_clf, cv="prefit").fit(X_calib, y_calib)
+
+    classes = base_clf.classes_
+
     sample = (X[:1,:])
     print(sample)
-    #print(sample)
-    #print(classifier.predict_proba(sample))
-    #print(classifier.predict(sample))
-    #print(classifier.classes_)
-    evaluation = evaluateSnapshot(sample, 0, 0, classifier)
-    print(evaluation)
-    print()
-    # sample_2 = np.array([[-4,1816.270263671875,3322.479736328125,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]])
-    # print(sample_2)
-    # eval_2 = evaluateSnapshot(sample_2, 0, 0, classifier)
-    # print(eval_2)
-    # print()
-    sample_3 = np.array([[3,2032.295654296875,1482.1551513671875,0,0,0,0,0,1,1,1,1,1,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0]])
-    print(sample_3)
-    probabilities = (classifier.predict_proba(sample_3)[0]).tolist()
-    classes = (classifier.classes_).tolist()
-    for option in classes:
-        print(option + ": " + str(probabilities[classes.index(option)]))
-    eval_3 = evaluateSnapshot(sample_3, 0, 0, classifier)
-    print(eval_3)
-    #classifier = knn(n_neighbors=3)
-    #classifier.fit(X, y)
+    print("---")
 
-def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, gatling): # gatling <- {0, 1, 2}, denotes which character has the gatlings. 0 is ignore
+    base_predictions = base_clf.predict_proba(sample)[0]
+    calibrated_predictions = calibrated_clf.predict_proba(sample)[0]
+    for index, option in enumerate(classes):
+        print(option)
+        print("base: " + str(base_predictions[index]))
+        print("calibrated: " + str(calibrated_predictions[index]))
+        print()
+
+def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, mode): # mode <- {1, 2}, 1 is offense, 2 is defense. classifier is assumed to be correct mode, just used for gatlings.
 
         # snapshot should be from opponent's perspective
         # i.e. opponentData should be playerData in the snapshot
@@ -66,11 +59,14 @@ def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, gatling): # gat
 
         player_options = config_player['options']['list'].split(',')
         opponent_options = config_opponent['options']['list'].split(',')
+        player_moves = config_player['moves']['option_names'].split(',')
+        opponent_moves = config_opponent['moves']['option_names'].split(',')
 
         probabilities = (opp_classifier.predict_proba(snapshot)[0]).tolist()
         #print(probabilities)
         classes = (opp_classifier.classes_).tolist()
         gatlings = snapshot[0][5:] # some kind of interpretation
+        gatling_options = []
         corrected_options = []
         corrected_probabilities = []
         nothing_probability = 0
@@ -82,9 +78,15 @@ def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, gatling): # gat
             else:
                 nothing_probability += probability
         
-        # for option in classes:
-        #     print(option)
-        #     print(probabilities[classes.index(option)])
+        for index, gatling in enumerate(gatlings):
+            gatling = int(gatling)
+            if (gatling == 1):
+                if (mode == 1): # gatlings are for player
+                    gatling_options.append(player_moves[index])
+                elif (mode == 2): # gatlings are for opponent
+                        gatling_options.append(opponent_moves[index])
+        
+        print(gatling_options)
 
         snapshot = snapshot[0].tolist()
 
@@ -105,6 +107,13 @@ def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, gatling): # gat
             bubble = 0
             player_range = int(player_option['range'], 10)
             player_startup = int(player_option['startup'], 10) + frame_adv
+            player_invuln = player_option['invuln']
+            player_guard = player_option['guard']
+
+            if (mode == 1): # i.e. player's option is a gatling, therefore bypasses frame_adv
+                if (player_option['name'] in gatling_options):
+                    player_startup = 0
+
             player_recovery = int(player_option['recovery'], 10)
             player_adv = int(player_option['adv'], 10)
             for opponent_option in opponent_options:
@@ -113,7 +122,14 @@ def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, gatling): # gat
                     winning_option = 0 # 1 if player option wins, -1 if it loses, 0 if nothing happens
                     opponent_option_weight = corrected_probabilities[corrected_options.index(opponent_option['name'])]
                     opponent_range = int(opponent_option['range'], 10)
-                    opponent_startup = int(opponent_option['startup'], 10) - frame_adv  
+                    opponent_startup = int(opponent_option['startup'], 10) - frame_adv
+                    opponent_invuln = opponent_option['invuln']
+                    opponent_guard = opponent_option['guard']
+
+                    if (mode == 2): # i.e. opponent's option is a gatling, therefore bypasses frame_adv
+                        if (player_option['name'] in gatling_options):
+                            opponent_startup = 0
+                    
                     if ((opponent_range < dist_diff) and (player_range >= dist_diff)):
                         winning_option = 1
                         bubble = 1
@@ -124,16 +140,36 @@ def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, gatling): # gat
                         winning_option = 0
                         bubble = 3
                     else:
-                        if (player_startup > opponent_startup):
-                            winning_option = -1
+                        if (player_invuln == "all"):
+                            winning_option = 1
                             bubble = 4
-                        elif (opponent_startup > player_startup):
+                        elif ((player_invuln == "low") and (opponent_guard != "low")):
                             winning_option = 1
                             bubble = 5
+                        elif ((player_invuln == "high") and (opponent_guard != "high")):
+                            winning_option = 1
+                            bubble = 6
+                        elif (opponent_invuln == "all"):
+                            winning_option = -1
+                            bubble = 7
+                        elif ((opponent_invuln == "low") and (player_guard != "low")):
+                            winning_option = -1
+                            bubble = 8
+                        elif ((opponent_invuln == "high") and (player_guard != "high")):
+                            winning_option = -1
+                            bubble = 9
                         else:
-                            winning_option = 0
-                            bubble = 6 
-                    
+                            if (player_startup > opponent_startup):
+                                winning_option = -1
+                                bubble = 10
+                            elif (opponent_startup > player_startup):
+                                winning_option = 1
+                                bubble = 11
+                            else:
+                                winning_option = 0
+                                bubble = 12
+                    if (player_option['name'] == "6P"):
+                        print(opponent_option['name'] + ": " + str(winning_option) + ": " + str(bubble))
                     option_eval = opponent_option_weight * winning_option
                     player_option_evaluation += opponent_option_weight * winning_option
             wins_nothing = 0

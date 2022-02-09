@@ -1,4 +1,5 @@
 import ctypes as c
+from tkinter import *
 from ctypes import wintypes as w
 from subprocess import check_output
 import ModuleEnumerator
@@ -10,13 +11,15 @@ import os
 import csv
 import sys
 import time
-
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LogisticRegression
 
 characters = ["Sol Badguy", "Ky Kiske", "May", "Axl Low", "Chipp Zanuff", "Potemkin", "Faust", "Millia Rage", "Zato-1", "Ramlethal Valentine", "Leo Whitefang", "Nagoriyuki", 
     "Giovanna", "Anji Mito", "I-No", "Goldlewis Dickinson", "Jack-O", "Happy Chaos"]
 
 codes = ["SOL", "KY", "MAY", "AXL", "CHIPP", "POT", "FAUST", "MILLIA", "ZATO", "RAM", "LEO", "NAGO", 
-    "GIO", "ANJI", "INO", "GOLD", "JACKO", "CHAOS"]
+    "GIO", "ANJI", "INO", "GLDS", "JACKO", "CHAOS"]
 
 sol_moves = ["5P","5K","5H","c.S","f.S","5D","6P","6H","6S","2P","2K","2H","2S","2D"]
 
@@ -44,6 +47,8 @@ def getPID():
     for proc in psutil.process_iter():
         if proc.name() == PROCNAME:
             return proc.pid
+    
+    return -1
 
 def GetValueFromAddress(processHandle, address, isFloat=False, is64bit=False, isString=False):
     if isString:
@@ -151,7 +156,7 @@ class PlayerData:
 
 class GameState:
 
-    def __init__(self):
+    def __init__(self, classifier_1, classifier_2):
         self.p1_frame_adv = 0
         self.p2_frame_adv = 0
         self.dist_diff = 0
@@ -166,6 +171,8 @@ class GameState:
         self.p2_blocking = 0 # for p2
         self.p1_frame_counter = 0
         self.p2_frame_counter = 0
+        self.classifier_1 = classifier_1
+        self.classifier_2 = classifier_2
         #self.state = "" # ground, air, wake-up, hit-stun (Idk some more as well maybe)
         # ignore for now
 
@@ -264,19 +271,180 @@ class GameState:
 
     def writeSnapshot(self, snapshot, playerData, opponentData, player_blocked):
         if (player_blocked == 0):
-            code_player = codes[playerData.char]
-            code_opponent = codes[opponentData.char]
-            if (code_player == code_opponent):
-                code_player.append("1")
-                code_opponent.append("2") 
-            with open(codes[playerData.char] + '_vs_' + codes[opponentData.char] + '.csv', 'a', newline='') as csvfile: # off
+            with open(codes[playerData.char] + '_vs_' + codes[opponentData.char] + '.csv', 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile, delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
                 writer.writerow(snapshot)
         else:
-            with open(codes[opponentData.char] + '_vs_' + codes[playerData.char] + '.csv', 'a', newline='') as csvfile: # def
+            with open(codes[opponentData.char] + '_vs_' + codes[playerData.char] + '.csv', 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile, delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
                 writer.writerow(snapshot)
 
+    def evaluateSnapshot(self, snapshot, playerChar, opponentChar, opp_classifier, mode): # mode <- {0, 1}, 0 is offense, 1 is defense. classifier is assumed to be correct mode, just used for gatlings.
+
+        # snapshot should be from opponent's perspective
+        # i.e. opponentData should be playerData in the snapshot
+        action = snapshot[-1]
+        snapshot = snapshot[:-1]
+        snapshot = np.array([snapshot])
+        print(snapshot)
+
+        config_player = configparser.ConfigParser()
+        config_player.read(str(playerChar) + '.ini')
+        config_opponent = configparser.ConfigParser()
+        config_opponent.read(str(opponentChar) + '.ini')
+
+        frame_adv = int(snapshot[0][0])
+
+        player_options = config_player['options']['list'].split(',')
+        opponent_options = config_opponent['options']['list'].split(',')
+        player_moves = config_player['moves']['option_names'].split(',')
+        opponent_moves = config_opponent['moves']['option_names'].split(',')
+
+        probabilities = (opp_classifier.predict_proba(snapshot)[0]).tolist()
+        #print(probabilities)
+        classes = (opp_classifier.classes_).tolist()
+        gatlings = snapshot[0][5:-1] # some kind of interpretation
+        gatling_options = []
+        corrected_options = []
+        corrected_probabilities = []
+        nothing_probability = 0
+        for option in classes:
+            probability = probabilities[classes.index(option)]
+            if (probability > 0.05):
+                corrected_options.append(option)
+                corrected_probabilities.append(probability)
+            else:
+                nothing_probability += probability
+        
+        for index, gatling in enumerate(gatlings):
+            gatling = int(gatling)
+            if (gatling == 1):
+                if (mode == 1): # gatlings are for player
+                    gatling_options.append(player_moves[index])
+                elif (mode == 2): # gatlings are for opponent
+                        gatling_options.append(opponent_moves[index])
+        
+        print(gatling_options)
+
+        snapshot = snapshot[0].tolist()
+
+        option_evals = []
+
+        dist_diff = abs(float(snapshot[1]) - float(snapshot[2]))
+
+                # clearly, this is not perfect.
+                # doesn't take into account invuln on some moves;
+                # doesn't take into account counter hit advantage being bigger on some moves;
+                # doesn't take into account recovery frames if both moves are out of range (potentially moves out of range should just be ignored, with exception for moves like 2S and 6P);
+                # doesn't take into account backdash, block etc. as options
+                # inexhaustive, will add to list once more things come to mind.
+
+        for player_option in player_options:
+            player_option = config_player[player_option]
+            player_option_evaluation = 0
+            bubble = 0
+            player_range = int(player_option['range'], 10)
+            player_startup = int(player_option['startup'], 10) + frame_adv
+            player_invuln = player_option['invuln']
+            player_guard = player_option['guard']
+
+            if (mode == 0): # i.e. player's option is a gatling, therefore bypasses frame_adv
+                if (player_option['name'] in gatling_options):
+                    player_startup = 0
+
+            player_recovery = int(player_option['recovery'], 10)
+            player_adv = int(player_option['adv'], 10)
+            for opponent_option in opponent_options:
+                opponent_option = config_player[opponent_option]
+                if (opponent_option['name'] in corrected_options):
+                    winning_option = 0 # 1 if player option wins, -1 if it loses, 0 if nothing happens
+                    opponent_option_weight = corrected_probabilities[corrected_options.index(opponent_option['name'])]
+                    opponent_range = int(opponent_option['range'], 10)
+                    opponent_startup = int(opponent_option['startup'], 10) - frame_adv
+                    opponent_invuln = opponent_option['invuln']
+                    opponent_guard = opponent_option['guard']
+
+                    if (mode == 1): # i.e. opponent's option is a gatling, therefore bypasses frame_adv
+                        if (player_option['name'] in gatling_options):
+                            opponent_startup = 0
+                    
+                    if ((opponent_range < dist_diff) and (player_range >= dist_diff)):
+                        winning_option = 1
+                        bubble = 1
+                    elif ((player_range < dist_diff) and (opponent_range >= dist_diff)):
+                        winning_option = -1
+                        bubble = 2
+                    elif ((player_range < dist_diff) and (opponent_range < dist_diff)):
+                        winning_option = 0
+                        bubble = 3
+                    else:
+                        if (player_invuln == "all"):
+                            winning_option = 1
+                            bubble = 4
+                        elif ((player_invuln == "low") and (opponent_guard != "low")):
+                            winning_option = 1
+                            bubble = 5
+                        elif ((player_invuln == "high") and (opponent_guard != "high")):
+                            winning_option = 1
+                            bubble = 6
+                        elif (opponent_invuln == "all"):
+                            winning_option = -1
+                            bubble = 7
+                        elif ((opponent_invuln == "low") and (player_guard != "low")):
+                            winning_option = -1
+                            bubble = 8
+                        elif ((opponent_invuln == "high") and (player_guard != "high")):
+                            winning_option = -1
+                            bubble = 9
+                        else:
+                            if (player_startup > opponent_startup):
+                                winning_option = -1
+                                bubble = 10
+                            elif (opponent_startup > player_startup):
+                                winning_option = 1
+                                bubble = 11
+                            else:
+                                winning_option = 0
+                                bubble = 12
+                    option_eval = opponent_option_weight * winning_option
+                    player_option_evaluation += opponent_option_weight * winning_option
+            wins_nothing = 0
+            wins_backdash = 0
+            wins_run = 0 # will need to think about this one
+            whiff_punishable = 0
+            if ((player_startup + player_recovery) > 16 + 10): # +10 is for fastest option
+                whiff_punishable = 1
+            if (player_range < dist_diff): # move will whiff if opponent does nothing
+                if (whiff_punishable): # move is whiff punishable
+                    wins_nothing = -1
+            else: # move will get blocked
+                if (player_adv > 0):
+                    wins_nothing = player_adv / 10
+                elif (player_adv > -10): # not block punishable
+                    wins_nothing = -0.5
+                else:
+                    wins_nothing = -(2 ** abs(player_adv / 30))
+                if (player_range < dist_diff + 800): # backdash range assumed to be 800 for all chars
+                    if (whiff_punishable):
+                        wins_backdash = -1
+                    else:
+                        wins_backdash = 0.5 # slight advantage since they push themselves away/toward corner
+            player_option_evaluation += wins_backdash * probabilities[classes.index("backdash")]
+            player_option_evaluation += wins_nothing * nothing_probability
+                    
+
+            #option_evals.append(player_option['name'] + ": " + str(player_option_evaluation))
+            option_evals.append(player_option_evaluation)
+        
+        print("Frame advantage: " + str(frame_adv * -1))
+        print("Player dist: " + str(snapshot[2]))
+        print("Opponent dist: " + str(snapshot[1]))
+        for index, option_eval in enumerate(option_evals):
+             #if (option_eval > 0):
+            print(player_moves[index] + ": " + str(option_eval))
+        print("Selected option evaluation: " + str(option_evals[player_moves.index(action)]))
+
+        return option_evals
 
     def updateData(self, p1_data, p2_data):
         
@@ -293,11 +461,11 @@ class GameState:
 
             if (p1_data.actionChange == 1): # player 1 takes an action
                 if ((p1_action['name'] != "block") and (p1_action['name'] != "shimmy")):
-                    snapshot = self.createSnapshot(p1_data, p2_data, 1, p1_action)
-                    print("1: ")
-                    print(snapshot)
-                    print()
-                    #self.writeSnapshot(snapshot, p1_data, p2_data, self.p1_blocking)
+                    snapshot = self.createSnapshot(p1_data, p2_data, 2, p1_action) # snapshot needs to be opponent pov
+                    if (self.p1_blocking == 1):
+                        self.evaluateSnapshot(snapshot, p1_data.char, p2_data.char, self.classifier_2, 1)
+                    else:
+                        self.evaluateSnapshot(snapshot, p1_data.char, p2_data.char, self.classifier_1, 0)
                     self.p1_blocking = 0
 
                 self.p1_frame_counter = time.time()
@@ -308,11 +476,11 @@ class GameState:
 
             if (p2_data.actionChange == 1):
                 if ((p2_action['name'] != "block") and (p2_action['name'] != "shimmy")):
-                    snapshot = self.createSnapshot(p1_data, p2_data, 2, p2_action)
-                    print("2: ")
-                    print(snapshot)
-                    print()
-                    #self.writeSnapshot(snapshot, p2_data, p1_data, self.p2_blocking)
+                    snapshot = self.createSnapshot(p1_data, p2_data, 1, p2_action) # snapshot needs to be opponent pov
+                    if (self.p2_blocking == 1):
+                        self.evaluateSnapshot(snapshot, p2_data.char, p1_data.char, self.classifier_1, 1)
+                    else:
+                        self.evaluateSnapshot(snapshot, p2_data.char, p1_data.char, self.classifier_2, 0)
                     self.p2_blocking = 0
                     
                 self.p2_frame_counter = time.time()
@@ -345,6 +513,20 @@ class GameState:
                         self.p1_frame_adv = str(int(config_p2[str(abs(self.p2_last_move))]['adv'])* (-1))
                         self.p2_frame_adv = str(int(config_p2[str(abs(self.p2_last_move))]['adv']))
 
+            # if (self.p1_blocked == 0):
+            #     if (p1_action['name'] == "block"):
+            #         self.p1_blocked = 1
+            #         self.p2_last_move = p2_data.action
+            #         self.p1_frame_adv = str(int(config_p2[str(abs(self.p2_last_move))]['adv'])* (-1))
+            #         self.p2_frame_adv = str(int(config_p2[str(abs(self.p2_last_move))]['adv']))
+
+            # if (self.p2_blocked == 0):
+            #     if (p2_action['name'] == "block"):
+            #         self.p2_blocked = 1
+            #         self.p1_last_move = p1_data.action
+            #         self.p1_frame_adv = str(int(config_p1[str(abs(self.p1_last_move))]['adv']))
+            #         self.p2_frame_adv = str(int(config_p1[str(abs(self.p1_last_move))]['adv']) * (-1))
+
             if (p1_action['name'] == "wakeup"):
                 self.p1_wakeup = 1
                 self.p1_frame_adv = 0
@@ -358,18 +540,36 @@ class GameState:
             p2_data.actionChange = 0        
 
 def main():
+
     config = configparser.ConfigParser()
     config.read('addresses.ini')
     p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
     p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
-    gamestate = GameState()
 
     clear = lambda: os.system('cls')
-    pid = getPID()    
+
+    pid = getPID()
+
     PROCESS_VM_READ = 0x0010
     processHandle = OpenProcess(PROCESS_VM_READ, False, pid)
     base = ModuleEnumerator.GetModuleAddressByPIDandName(pid, "GGST-Win64-Shipping.exe")
     clear()
+    p1_pd.updateData(processHandle, base, pid)
+    p2_pd.updateData(processHandle, base, pid)
+
+    print("Loading...")
+        
+    raw_data_1 = pd.read_csv(codes[p1_pd.char] + "_vs_" + codes[p2_pd.char] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
+    raw_data_2 = pd.read_csv(codes[p2_pd.char] + "_vs_" + codes[p1_pd.char] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
+    X_1 = raw_data_1.iloc[:, :-1].to_numpy()
+    y_1 = raw_data_1.iloc[:, -1].to_numpy()
+    X_2 = raw_data_2.iloc[:, :-1].to_numpy()
+    y_2 = raw_data_2.iloc[:, -1].to_numpy()
+    classifier_1 = LogisticRegression(random_state=0, max_iter=100000).fit(X_1, y_1)
+    classifier_2 = LogisticRegression(random_state=0, max_iter=100000).fit(X_2, y_2)
+    clear()
+
+    gamestate = GameState(classifier_1, classifier_2)
 
     while(check_pid(pid)):
         p1_pd.updateData(processHandle, base, pid)
@@ -378,7 +578,7 @@ def main():
             # reset gamestate
             p1_pd.lives_changed = 0
             p2_pd.lives_changed = 0
-            gamestate = GameState()
+            gamestate = GameState(classifier_1, classifier_2)
         gamestate.updateData(p1_pd, p2_pd)
     return 0
 

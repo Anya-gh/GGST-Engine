@@ -259,6 +259,7 @@ def main():
                 print("Character: " + characters[p1_pd.char])
             try:
                 print("Action: " + str(move_config_1[str(abs(p1_pd.action))]['name']))
+                print(0)
             except KeyError:
                 print("Action: ---")
                 print(p1_pd.action)
@@ -273,6 +274,7 @@ def main():
                 print("Character: " + characters[p2_pd.char])
             try:
                 print("Action: " + str(move_config_2[str(abs(p2_pd.action))]['name']))
+                print(0)
             except KeyError:
                 print("Action: ---")
                 print(p2_pd.action)
