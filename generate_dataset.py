@@ -93,6 +93,8 @@ def GetValueFromPointer(processHandle, base, section):
     successful = ReadProcessMemory(processHandle, address, c.byref(final), c.sizeof(final), c.byref(bytesRead))
     return final.value
 
+# 1930
+
 def check_pid(pid):        
     """ Check For the existence of a unix pid. """
     return psutil.pid_exists(pid)
@@ -128,7 +130,7 @@ class PlayerData:
                 self.lives_changed = 1
             self.tension = GetValueFromAddress(processHandle, base + self.tension_offset, isFloat=True)
             self.burst = GetValueFromAddress(processHandle, base + self.burst_offset, isFloat=True)
-            self.dist = GetValueFromAddress(processHandle, base + self.dist_offset, isFloat=True)
+            self.dist = (1930 - GetValueFromAddress(processHandle, base + self.dist_offset, isFloat=True)) # dist from center
             self.char = GetValueFromAddress(processHandle, base + self.char_offset)
             temp = self.action
             self.action = GetValueFromPointer(processHandle, base, str(self.char) + '_p' + str(self.player_id))
@@ -229,8 +231,8 @@ class GameState:
         output.append(playerData.dist)
         output.append(opponentData.dist)
 
-        # output.append(player_blocked)
-        # output.append(opponent_blocked)
+        #output.append(player_blocked)
+        #output.append(opponent_blocked)
 
         # nvm, some options dont have gatlings so throwing this in after all
         # ofc could still use frame_adv greater/less than 0 but probably better this way
@@ -244,38 +246,32 @@ class GameState:
         # separate, you can figure out who's gatlings they are. this might be hard to do with past data but is very easy
         # to do with live data.
 
+        # added back in to attempt to reduce state complexity.
+
         output.append(player_wakeup) # this is wakeup
         output.append(opponent_wakeup) # this is oki
-        #output.append(self.opponent_wakeup)
-        if (player_blocked == 0):
-            for move in player_moves:
-                if move in player_gatlings:
-                    output.append(1)
-                else:
-                    output.append(0)
-        else:
-            for move in opponent_moves:
-                if move in opponent_gatlings:
-                    output.append(1)
-                else:
-                    output.append(0)
+        
+        # output.append(self.opponent_wakeup)
+        #if (player_blocked == 0):
+        for move in player_moves:
+            if move in player_gatlings:
+                output.append(1)
+            else:
+                output.append(0)
+        #else:
+        for move in opponent_moves:
+            if move in opponent_gatlings:
+                output.append(1)
+            else:
+                output.append(0)
         output.append(action['name'])
         return output
 
     def writeSnapshot(self, snapshot, playerData, opponentData, player_blocked):
-        if (player_blocked == 0):
-            code_player = codes[playerData.char]
-            code_opponent = codes[opponentData.char]
-            if (code_player == code_opponent):
-                code_player.append("1")
-                code_opponent.append("2") 
-            with open(codes[playerData.char] + '_vs_' + codes[opponentData.char] + '.csv', 'a', newline='') as csvfile: # off
-                writer = csv.writer(csvfile, delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-                writer.writerow(snapshot)
-        else:
-            with open(codes[opponentData.char] + '_vs_' + codes[playerData.char] + '.csv', 'a', newline='') as csvfile: # def
-                writer = csv.writer(csvfile, delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-                writer.writerow(snapshot)
+
+        with open(codes[playerData.char] + '_vs_' + codes[opponentData.char] + '.csv', 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(snapshot)
 
 
     def updateData(self, p1_data, p2_data):
@@ -297,7 +293,7 @@ class GameState:
                     print("1: ")
                     print(snapshot)
                     print()
-                    #self.writeSnapshot(snapshot, p1_data, p2_data, self.p1_blocking)
+                    self.writeSnapshot(snapshot, p1_data, p2_data, self.p1_blocking)
                     self.p1_blocking = 0
 
                 self.p1_frame_counter = time.time()
@@ -312,7 +308,7 @@ class GameState:
                     print("2: ")
                     print(snapshot)
                     print()
-                    #self.writeSnapshot(snapshot, p2_data, p1_data, self.p2_blocking)
+                    self.writeSnapshot(snapshot, p2_data, p1_data, self.p2_blocking)
                     self.p2_blocking = 0
                     
                 self.p2_frame_counter = time.time()

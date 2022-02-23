@@ -8,7 +8,7 @@ import os
 import csv
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import load_iris
-from sklearn.neighbors import KNeighborsClassifier as knn
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split
 
@@ -18,7 +18,7 @@ def main(): # give character id of p1 and p2 (take as command line arg)
     codes = ["SOL", "KY", "MAY", "AXL", "CHIPP", "POT", "FAUST", "MILLIA", "ZATO", "RAM", "LEO", "NAGO", 
     "GIO", "ANJI", "INO", "GOLD", "JACKO", "CHAOS"]
     raw_data = pd.read_csv(codes[int(sys.argv[1:][0])] + "_vs_" + codes[int(sys.argv[1:][1])] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
-    
+    snapshots = raw_data.to_numpy()
     #raw_data = pd.read_csv(sys.argv[1:][0] + "_vs_" + sys.argv[1:][1] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
     X = raw_data.iloc[:, :-1].to_numpy()
     y = raw_data.iloc[:, -1].to_numpy()
@@ -26,22 +26,59 @@ def main(): # give character id of p1 and p2 (take as command line arg)
     #print(y)
     X_train, X_calib, y_train, y_calib = train_test_split(X, y, random_state=42)
 
-    base_clf = LogisticRegression(random_state=0, max_iter=100000).fit(X_train, y_train)
+    base_clf = LogisticRegression(random_state=0, max_iter=10000000).fit(X_train, y_train)
     calibrated_clf = CalibratedClassifierCV(base_estimator=base_clf, cv="prefit").fit(X_calib, y_calib)
+
+    knn_clf = KNeighborsClassifier(n_neighbors=100).fit(X_train, y_train)
 
     classes = base_clf.classes_
 
-    sample = (X[:1,:])
+    sample = [[0,650,-650,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]]
     print(sample)
     print("---")
 
+    
+    moves_dict = {}
+    total = 0
+    for snapshot in snapshots:
+        if (((snapshot[1] > 500) and (snapshot[1] < 800)) and ((snapshot[2] < -500) and (snapshot[2] > -800)) and (snapshot[0] == 0)):
+            option = snapshot[-1]
+            count = moves_dict.get(option)
+            if (count):
+                moves_dict.update({option : (count + 1)})
+            else:
+                moves_dict.update({option : 1})
+            total += 1
+        elif (((snapshot[1] < -500) and (snapshot[1] > -800)) and ((snapshot[2] > 500) and (snapshot[2] < 800)) and (snapshot[0] == 0)):
+            option = snapshot[-1]
+            count = moves_dict.get(option)
+            if (count):
+                moves_dict.update({option : (count + 1)})
+            else:
+                moves_dict.update({option : 1})
+            total += 1
+    dict_size = len(moves_dict)
+
     base_predictions = base_clf.predict_proba(sample)[0]
     calibrated_predictions = calibrated_clf.predict_proba(sample)[0]
+    knn_predictions = knn_clf.predict_proba(sample)[0]
     for index, option in enumerate(classes):
         print(option)
         print("base: " + str(base_predictions[index]))
         print("calibrated: " + str(calibrated_predictions[index]))
+        print("knn: " + str(knn_predictions[index]))
+        if (option in moves_dict):
+            real_prob = (moves_dict.get(option) / total)
+            print("real: " + str(real_prob))
         print()
+
+def compareSnapshot(data, snapshot, classifier):
+    moves_dict = {}
+    for option in data:
+        count = moves_dict.get(option)
+        if (count):
+            moves_dict.update({option, (count + 1)})
+
 
 def evaluateSnapshot(snapshot, p1_char, p2_char, opp_classifier, mode): # mode <- {1, 2}, 1 is offense, 2 is defense. classifier is assumed to be correct mode, just used for gatlings.
 

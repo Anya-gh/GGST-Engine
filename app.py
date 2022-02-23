@@ -1,6 +1,7 @@
 import ctypes as c
 from tkinter import *
 from tkinter import ttk
+from tkinter.filedialog import askopenfilename
 from ctypes import wintypes as w
 from subprocess import check_output
 import ModuleEnumerator
@@ -27,6 +28,8 @@ codes = ["SOL", "KY", "MAY", "AXL", "CHIPP", "POT", "FAUST", "MILLIA", "ZATO", "
 sol_moves = ["5P","5K","5H","c.S","f.S","5D","6P","6H","6S","2P","2K","2H","2S","2D"]
 
 confirm_pressed = False
+risk_data_path = ""
+risk_pressed = False
 
 k32 = c.windll.kernel32
 
@@ -261,18 +264,18 @@ class GameState:
         output.append(player_wakeup) # this is wakeup
         output.append(opponent_wakeup) # this is oki
         #output.append(self.opponent_wakeup)
-        if (player_blocked == 0):
-            for move in player_moves:
-                if move in player_gatlings:
-                    output.append(1)
-                else:
-                    output.append(0)
-        else:
-            for move in opponent_moves:
-                if move in opponent_gatlings:
-                    output.append(1)
-                else:
-                    output.append(0)
+        #if (player_blocked == 0):
+        for move in player_moves:
+            if move in player_gatlings:
+                output.append(1)
+            else:
+                output.append(0)
+        #else:
+        for move in opponent_moves:
+            if move in opponent_gatlings:
+                output.append(1)
+            else:
+                output.append(0)
         output.append(action['name'])
         return output
 
@@ -304,12 +307,16 @@ class GameState:
         player_options = config_player['options']['list'].split(',')
         opponent_options = config_opponent['options']['list'].split(',')
         player_moves = config_player['moves']['option_names'].split(',')
+        player_gatling_list = config_player['moves']['list'].split(',')
+        opponent_gatling_list = config_opponent['moves']['list'].split(',')
         opponent_moves = config_opponent['moves']['option_names'].split(',')
+        player_gatlings = []
+        opponent_gatlings = []
 
         probabilities = (opp_classifier.predict_proba(snapshot)[0]).tolist()
         #print(probabilities)
         classes = (opp_classifier.classes_).tolist()
-        gatlings = snapshot[0][5:-1] # some kind of interpretation
+        gatlings = snapshot[0][4:-1] # some kind of interpretation. 4 because it excludes the 4th, takes from 5th onwards
         gatling_options = []
         corrected_options = []
         corrected_probabilities = []
@@ -322,17 +329,31 @@ class GameState:
             else:
                 nothing_probability += probability
         
-        for index, gatling in enumerate(gatlings):
-            gatling = int(gatling)
+        gatling_index = 0
+        for index, move in enumerate(player_gatling_list):
+            gatling = int(gatlings[index])
+            gatling_index += 1
             if (gatling == 1):
-                if (mode == 1): # gatlings are for player
-                    gatling_options.append(player_moves[index])
-                elif (mode == 2): # gatlings are for opponent
-                        gatling_options.append(opponent_moves[index])
+                player_gatlings.append(move)
+        #else:
+        for index, move in enumerate(opponent_gatling_list):
+            gatling = int(gatlings[index + gatling_index])
+            if (gatling == 1):
+                opponent_gatlings.append(move)
+        
+        # for index, gatling in enumerate(gatlings):
+        #     gatling = int(gatling)
+        #     if (gatling == 1):
+        #         if (mode == 1): # gatlings are for player
+        #             gatling_options.append(player_moves[index])
+        #         elif (mode == 2): # gatlings are for opponent
+        #                 gatling_options.append(opponent_moves[index])
         
         snapshot = snapshot[0].tolist()
 
         option_evals = []
+
+        risks = []
 
         dist_diff = abs(float(snapshot[1]) - float(snapshot[2]))
 
@@ -342,7 +363,8 @@ class GameState:
                 # doesn't take into account recovery frames if both moves are out of range (potentially moves out of range should just be ignored, with exception for moves like 2S and 6P);
                 # doesn't take into account backdash, block etc. as options
                 # inexhaustive, will add to list once more things come to mind.
-
+        min_risk = 0
+        max_risk = 0
         for player_option in player_options:
             player_option = config_player[player_option]
             player_option_evaluation = 0
@@ -352,12 +374,14 @@ class GameState:
             player_invuln = player_option['invuln']
             player_guard = player_option['guard']
 
-            if (mode == 0): # i.e. player's option is a gatling, therefore bypasses frame_adv
-                if (player_option['name'] in gatling_options):
-                    player_startup = 0
+            #if (mode == 0): # i.e. player's option is a gatling, therefore bypasses frame_adv
+            # unnecessary since player and opponents gatlings in snapshot
+            if (player_option['name'] in player_gatlings):
+                player_startup = 0
 
             player_recovery = int(player_option['recovery'], 10)
             player_adv = int(player_option['adv'], 10)
+            risk = 0
             for opponent_option in opponent_options:
                 opponent_option = config_player[opponent_option]
                 if (opponent_option['name'] in corrected_options):
@@ -367,10 +391,12 @@ class GameState:
                     opponent_startup = int(opponent_option['startup'], 10) - frame_adv
                     opponent_invuln = opponent_option['invuln']
                     opponent_guard = opponent_option['guard']
+                    opponent_punish = int(opponent_option['punish'], 10)
 
-                    if (mode == 1): # i.e. opponent's option is a gatling, therefore bypasses frame_adv
-                        if (player_option['name'] in gatling_options):
-                            opponent_startup = 0
+                    # if (mode == 1): # i.e. opponent's option is a gatling, therefore bypasses frame_adv
+                    # unnecessary
+                    if (opponent_option['name'] in opponent_gatlings):
+                        opponent_startup = 0
                     
                     if ((opponent_range < dist_diff) and (player_range >= dist_diff)):
                         winning_option = 1
@@ -410,8 +436,13 @@ class GameState:
                             else:
                                 winning_option = 0
                                 bubble = 12
+                    if (winning_option == -1):
+                        risk += (opponent_option_weight * opponent_punish)
                     option_eval = opponent_option_weight * winning_option
+
                     player_option_evaluation += opponent_option_weight * winning_option
+                
+                
             wins_nothing = 0
             wins_backdash = 0
             wins_run = 0 # will need to think about this one
@@ -433,26 +464,29 @@ class GameState:
                         wins_backdash = -1
                     else:
                         wins_backdash = 0.5 # slight advantage since they push themselves away/toward corner
+
             player_option_evaluation += wins_backdash * probabilities[classes.index("backdash")]
             player_option_evaluation += wins_nothing * nothing_probability
-                    
+            
 
             #option_evals.append(player_option['name'] + ": " + str(player_option_evaluation))
-            option_evals.append([player_option['name'], player_option_evaluation])
-        
-        # print("Frame advantage: " + str(frame_adv * -1))
-        # print("Player dist: " + str(snapshot[2]))
-        # print("Opponent dist: " + str(snapshot[1]))
-        # for index, option_eval in enumerate(option_evals):
-        #     #if (option_eval > 0):
-        #     print(player_moves[index] + ": " + str(option_eval))
-        # print("Selected option evaluation: " + str(option_evals[player_moves.index(action)]))
-
-        # label_frame_adv.configure(text = str(frame_adv * -1))
-        # label_dist.configure(text = str(dist_diff))
-        # label_option.configure(text = ("Selected: " + action + " - " + str(option_evals[player_moves.index(action)])))
-        # best_option = player_moves[option_evals.index(max(options_evals))]
-        # label_best.configure(text = ("Best: " + best_option + " - " + str(max(options_evals))))
+            option_evals.append([player_option['name'], player_option_evaluation, risk, 0])
+            if (player_option_evaluation > 0):
+                risks.append(risk)
+        if (len(risks) > 0):
+            max_risk = max(risks)
+            min_risk = min(risks)
+        else:
+            max_risk = 0
+            min_risk = 0
+        size = max_risk - min_risk
+        for index, option_eval in enumerate(option_evals):
+            dist = option_eval[2] - min_risk
+            if (size != 0):
+                option_evals[index][2] = (dist / size)
+                option_evals[index][3] = size
+            else:
+                option_evals[index][2] = 0
 
         return option_evals
 
@@ -474,7 +508,7 @@ class GameState:
                     snapshot = self.createSnapshot(p1_data, p2_data, 2, p1_action) # snapshot needs to be opponent pov
                     evals = []
                     if (self.p1_blocking == 1):
-                        evals = self.evaluateSnapshot(snapshot, p1_data.char, p2_data.char, self.classifier_2, 1)
+                        evals = self.evaluateSnapshot(snapshot, p1_data.char, p2_data.char, self.classifier_2, 1) # think these should both be classifier_2 now
                     else:
                         evals = self.evaluateSnapshot(snapshot, p1_data.char, p2_data.char, self.classifier_1, 0)
                     self.output = [self.p1_frame_adv, snapshot[1:], evals, p1_action['name']]
@@ -491,7 +525,7 @@ class GameState:
                     snapshot = self.createSnapshot(p1_data, p2_data, 1, p2_action) # snapshot needs to be opponent pov
                     evals = []
                     if (self.p2_blocking == 1):
-                        evals = self.evaluateSnapshot(snapshot, p2_data.char, p1_data.char, self.classifier_1, 1)
+                        evals = self.evaluateSnapshot(snapshot, p2_data.char, p1_data.char, self.classifier_1, 1) # likewise should both be classifier_1
                     else:
                         evals = self.evaluateSnapshot(snapshot, p2_data.char, p1_data.char, self.classifier_2, 0)
                     self.output = [self.p2_frame_adv, snapshot[1:], evals, p2_action['name']]
@@ -551,10 +585,31 @@ class GameState:
 
         except KeyError:
             p1_data.actionChange = 0
-            p2_data.actionChange = 0        
+            p2_data.actionChange = 0
 
 # def configureLabel(label_, text_):
 #     label_.configure(text = text_)
+
+def getAverageRisk(p1_char, p2_char, side, classifier_1, classifier_2, snapshots):
+    gs = GameState(classifier_1, classifier_2, side)
+    risk = 0
+    total = 0
+    for snapshot in snapshots:
+        evals = []
+        if (side == 1):
+            evals = gs.evaluteSnapshot(snapshot, p1_char, p2_char, classifier_2, 0)
+        else:
+            evals = gs.evaluateSnapshot(snapshot, p2_char, p1_char, classifier_1, 0)
+        action = snapshot[-1]
+        for elem in evals:
+            if ((elem[0] == action) and (elem[1] > 0) and (elem[3] > 0)): # checking that the option was actually good
+                risk += elem[2]
+                total += 1
+                print(snapshot)
+                print(elem[2])
+                print(elem[3])
+    average_risk = (risk / total)
+    return average_risk
 
 def configureOutput(label_frame_adv, label_dist, label_option, label_best, out_frame_adv, out_dist, out_option, out_best):
     label_frame_adv.configure(text = out_frame_adv)
@@ -596,6 +651,12 @@ def main():
     bottomframe = Frame(root)
     bottomframe.pack()
 
+    load_risk_label = Label(bottomframe, fg = "black", text = "Load previous data (optional)")
+    load_risk_label.pack(pady = 15)
+
+    load_risk = Button(bottomframe, text = 'Load', command = riskProcedure)
+    load_risk.pack()
+
     confirm = Button(bottomframe, text = 'Confirm', command = confirmProcedure)
     confirm.pack(pady = 15, side=BOTTOM)
     label_error = Label(bottomframe, fg = "red", text = "Please fill every field, then try again.")
@@ -608,7 +669,7 @@ def main():
             if ((character_1.get() == -1) or (character_2.get() == -1) or (player_side.get() == -1)):
                 label_error.pack()
                 confirm_pressed = False
-
+    side = player_side.get()
     p1_char = characters.index(character_1.get())
     p2_char = characters.index(character_2.get())
 
@@ -617,9 +678,9 @@ def main():
     p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
     p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
     config_player = configparser.ConfigParser()
-    if (player_side.get() == 1):
+    if (side == 1):
         config_player.read((str(p1_char) + '.ini'))
-    elif (player_side.get() == 2):
+    elif (side == 2):
         config_player.read((str(p2_char) + '.ini'))
     player_options = config_player['options']['list'].split(',')
     player_moves = config_player['moves']['option_names'].split(',')
@@ -640,12 +701,18 @@ def main():
 
     raw_data_1 = pd.read_csv(codes[p1_char] + "_vs_" + codes[p2_char] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
     raw_data_2 = pd.read_csv(codes[p2_char] + "_vs_" + codes[p1_char] + ".csv", delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None)
+    risk_data = None
+
     X_1 = raw_data_1.iloc[:, :-1].to_numpy()
     y_1 = raw_data_1.iloc[:, -1].to_numpy()
+    X_1_train, X_1_calib, y_1_train, y_1_calib = train_test_split(X_1, y_1, random_state=42)
     X_2 = raw_data_2.iloc[:, :-1].to_numpy()
     y_2 = raw_data_2.iloc[:, -1].to_numpy()
-    classifier_1 = LogisticRegression(random_state=0, max_iter=100000).fit(X_1, y_1)
-    classifier_2 = LogisticRegression(random_state=0, max_iter=100000).fit(X_2, y_2)
+    X_2_train, X_2_calib, y_2_train, y_2_calib = train_test_split(X_2, y_2, random_state=42)
+    base_1 = LogisticRegression(random_state=0, max_iter=100000).fit(X_1_train, y_1_train)
+    base_2 = LogisticRegression(random_state=0, max_iter=100000).fit(X_2_train, y_2_train)
+    classifier_1 = CalibratedClassifierCV(base_estimator=base_1, cv="prefit").fit(X_1_calib, y_1_calib)
+    classifier_2 = CalibratedClassifierCV(base_estimator=base_2, cv="prefit").fit(X_1_calib, y_1_calib)
 
     label_loading.destroy()
 
@@ -658,7 +725,11 @@ def main():
 
 
     gamestate = GameState(classifier_1, classifier_2, player_side.get())
-
+    avg_risk = 0
+    if (risk_pressed):
+        risk_data = pd.read_csv(risk_data_path, quotechar='|', quoting=csv.QUOTE_MINIMAL, header=None).to_numpy()
+        avg_risk = getAverageRisk(p1_char, p2_char, side, classifier_1, classifier_2, risk_data)
+    print(avg_risk)
     PROCESS_VM_READ = 0x0010
 
     label_analysing = Label(root, text="Analysing...", fg="black")
@@ -690,17 +761,23 @@ def main():
                         label_frame_advantage.configure(text = ("Frame advantage: " + str(output[0]))) # first element of output (snapshot), first element of snapshot (frame_adv)
                         label_player_pos.configure(text = ("Player position: " + str(output[1][1]))) # first element of output (snapshot), third element of snapshot (player_dist); snapshot is opponent pov so player's dist will be third not second
                         label_opponent_pos.configure(text = ("Opponent position: " + str(output[1][0]))) # first element of output (snapshot), second element of snapshot (opponent_dist); snapshot is opponent pov so opponent's dist will be second not third
-                        output_evals = sorted(output[2], reverse=True, key = lambda x: x[1]) # sorts by second element, ignores first (i guess?)
+                        output_evals = sorted(output[2], reverse=True, key = lambda x: x[1]) # sorts by second element, ignores first and third (i guess?)
                         for index, output_eval in enumerate(output_evals):
                             if (output[3] == output_eval[0]):
                                 label_selected.configure(text = ("Player selected option: " + output_eval[0] + ": " + str(output_eval[1])))
                             else:
                                 if (index >= len(option_labels)):
-                                    new_label = Label(root, text=(output_eval[0] + ": " + str(output_eval[1])))
+                                    if ((output_eval[2] < (1.5 * (avg_risk))) and (output_eval[2] > (0.5 * (avg_risk)))):
+                                        new_label = Label(root, text=(output_eval[0] + ": " + str(output_eval[1]) + " : " + str(output_eval[2])), fg="green")
+                                    else:
+                                        new_label = Label(root, text=(output_eval[0] + ": " + str(output_eval[1]) + " : " + str(output_eval[2])), fg="black")
                                     option_labels.append(new_label)
                                 else:
                                     old_label = option_labels[index]
-                                    old_label.configure(text=(output_eval[0] + ": " + str(output_eval[1])))
+                                    if ((output_eval[2] < (1.5 * (avg_risk))) and (output_eval[2] > (0.5 * (avg_risk)))):
+                                        old_label.configure(text=(output_eval[0] + ": " + str(output_eval[1]) + " : " + str(output_eval[2])), fg="green")
+                                    else:
+                                        old_label.configure(text=(output_eval[0] + ": " + str(output_eval[1]) + " : " + str(output_eval[2])), fg="black")
                         
                         label_frame_advantage.pack()
                         label_player_pos.pack()
@@ -732,5 +809,12 @@ def changecolor(label):
 def confirmProcedure():
     global confirm_pressed
     confirm_pressed = True
+
+def riskProcedure():
+    global risk_data_path
+    global risk_pressed
+    risk_data_path = askopenfilename()
+    risk_pressed = True
+    print(risk_data_path)
 
 main()
