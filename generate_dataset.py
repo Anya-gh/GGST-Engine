@@ -39,11 +39,7 @@ CloseHandle.argtypes = [w.HANDLE]
 CloseHandle.restype = w.BOOL
 
 def getPID():
-    PROCNAME = "GGST-Win64-Shipping.exe"
-
-    for proc in psutil.process_iter():
-        if proc.name() == PROCNAME:
-            return proc.pid
+    return 8356
 
 def GetValueFromAddress(processHandle, address, isFloat=False, is64bit=False, isString=False):
     if isString:
@@ -101,12 +97,13 @@ def check_pid(pid):
 
 class PlayerData:
     
-    def __init__(self, player_id, hp_offset, lives_offset, tension_offset, burst_offset, dist_offset, char_offset):
+    def __init__(self, player_id, hp_offset, lives_offset, tension_offset, burst_offset, risc_offset, dist_offset, char_offset):
         self.player_id = player_id
         self.hp_offset = int(hp_offset, 0)
         self.lives_offset = int(lives_offset, 0)
         self.tension_offset = int(tension_offset, 0)
         self.burst_offset = int(burst_offset, 0)
+        self.risc_offset = int(risc_offset, 0)
         self.dist_offset = int(dist_offset, 0)
         self.char_offset = int(char_offset, 0)
         self.hp = -1
@@ -115,6 +112,7 @@ class PlayerData:
         self.tension = -1
         self.tension_record = self.tension
         self.burst = -1
+        self.risc = -1
         self.dist = -1
         self.char = -1
         self.action = -99
@@ -130,6 +128,7 @@ class PlayerData:
                 self.lives_changed = 1
             self.tension = GetValueFromAddress(processHandle, base + self.tension_offset, isFloat=True)
             self.burst = GetValueFromAddress(processHandle, base + self.burst_offset, isFloat=True)
+            self.risc = GetValueFromAddress(processHandle, base + self.risc_offset, isFloat=True)
             self.dist = (1930 - GetValueFromAddress(processHandle, base + self.dist_offset, isFloat=True)) # dist from center
             self.char = GetValueFromAddress(processHandle, base + self.char_offset)
             temp = self.action
@@ -227,10 +226,17 @@ class GameState:
 
         index_list = []
         output = []
-        output.append(frame_adv)
+        output.append(playerData.hp)
+        output.append(opponentData.hp)
+        output.append(playerData.tension)
+        output.append(opponentData.tension)
+        output.append(playerData.burst)
+        output.append(opponentData.burst)
+        output.append(playerData.risc)
+        output.append(opponentData.risc)
         output.append(playerData.dist)
         output.append(opponentData.dist)
-
+        output.append(frame_adv)
         #output.append(player_blocked)
         #output.append(opponent_blocked)
 
@@ -269,7 +275,8 @@ class GameState:
 
     def writeSnapshot(self, snapshot, playerData, opponentData, player_blocked):
 
-        with open(codes[playerData.char] + '_vs_' + codes[opponentData.char] + '.csv', 'a', newline='') as csvfile:
+        #with open(codes[playerData.char] + '_vs_' + codes[opponentData.char] + '.csv', 'a', newline='') as csvfile:
+        with open('player.csv', 'a', newline='') as csvfile:
             writer = csv.writer(csvfile, delimiter = ',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
             writer.writerow(snapshot)
 
@@ -308,7 +315,7 @@ class GameState:
                     print("2: ")
                     print(snapshot)
                     print()
-                    self.writeSnapshot(snapshot, p2_data, p1_data, self.p2_blocking)
+                    #self.writeSnapshot(snapshot, p2_data, p1_data, self.p2_blocking)
                     self.p2_blocking = 0
                     
                 self.p2_frame_counter = time.time()
@@ -356,8 +363,8 @@ class GameState:
 def main():
     config = configparser.ConfigParser()
     config.read('addresses.ini')
-    p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
-    p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
+    p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_risc_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
+    p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_risc_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
     gamestate = GameState()
 
     clear = lambda: os.system('cls')

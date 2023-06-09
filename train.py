@@ -11,6 +11,8 @@ from sklearn.datasets import load_iris
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.naive_bayes import GaussianNB
 
 import sys
 
@@ -30,6 +32,10 @@ def main(): # give character id of p1 and p2 (take as command line arg)
     calibrated_clf = CalibratedClassifierCV(base_estimator=base_clf, cv="prefit").fit(X_calib, y_calib)
 
     knn_clf = KNeighborsClassifier(n_neighbors=100).fit(X_train, y_train)
+
+    ada_clf = AdaBoostClassifier(n_estimators=100, random_state=0).fit(X_train, y_train)
+
+    nb_clf = GaussianNB().fit(X_train, y_train)
 
     classes = base_clf.classes_
 
@@ -62,11 +68,15 @@ def main(): # give character id of p1 and p2 (take as command line arg)
     base_predictions = base_clf.predict_proba(sample)[0]
     calibrated_predictions = calibrated_clf.predict_proba(sample)[0]
     knn_predictions = knn_clf.predict_proba(sample)[0]
+    ada_predictions = ada_clf.predict_proba(sample)[0]
+    nb_predictions = nb_clf.predict_proba(sample)[0]
     for index, option in enumerate(classes):
         print(option)
         print("base: " + str(base_predictions[index]))
         print("calibrated: " + str(calibrated_predictions[index]))
         print("knn: " + str(knn_predictions[index]))
+        print("ada: " + str(ada_predictions[index]))
+        print("nb: " + str(nb_predictions[index]))
         if (option in moves_dict):
             real_prob = (moves_dict.get(option) / total)
             print("real: " + str(real_prob))

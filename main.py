@@ -31,11 +31,7 @@ CloseHandle.argtypes = [w.HANDLE]
 CloseHandle.restype = w.BOOL
 
 def getPID():
-    PROCNAME = "GGST-Win64-Shipping.exe"
-
-    for proc in psutil.process_iter():
-        if proc.name() == PROCNAME:
-            return proc.pid
+    return 8356
 
 def GetValueFromAddress(processHandle, address, isFloat=False, is64bit=False, isString=False):
     if isString:
@@ -51,6 +47,7 @@ def GetValueFromAddress(processHandle, address, isFloat=False, is64bit=False, is
     successful = ReadProcessMemory(processHandle, address, c.byref(data), c.sizeof(data), c.byref(bytesRead))
     if not successful:
         e = GetLastError()
+        print(address)
         print("ReadProcessMemory Error: Code " + str(e))
 
     value = data.value
@@ -80,7 +77,8 @@ def GetValueFromPointer(processHandle, base, section):
             address = int(data.value) + int(config[section][key], 0)
             if not successful:
                 e = GetLastError()
-                print("ReadProcessMemory Error: Code " + str(e))
+                print(key)
+                print("1: ReadProcessMemory Error: Code " + str(e))
     final = c.c_short()
     successful = ReadProcessMemory(processHandle, address, c.byref(final), c.sizeof(final), c.byref(bytesRead))
     return final.value
@@ -91,18 +89,20 @@ def check_pid(pid):
 
 class PlayerData:
     
-    def __init__(self, player_id, hp_offset, lives_offset, tension_offset, burst_offset, dist_offset, char_offset):
+    def __init__(self, player_id, hp_offset, lives_offset, tension_offset, burst_offset, risc_offset, dist_offset, char_offset):
         self.player_id = player_id
         self.hp_offset = int(hp_offset, 0)
         self.lives_offset = int(lives_offset, 0)
         self.tension_offset = int(tension_offset, 0)
         self.burst_offset = int(burst_offset, 0)
+        self.risc_offset = int(risc_offset, 0)
         self.dist_offset = int(dist_offset, 0)
         self.char_offset = int(char_offset, 0)
         self.hp = -1
         self.lives_lost = -1
         self.tension = -1
         self.burst = -1
+        self.risc = -1
         self.dist = -1
         self.char = -1
         self.action = -99
@@ -115,9 +115,11 @@ class PlayerData:
             self.lives_lost = GetValueFromAddress(processHandle, base + self.lives_offset)
             self.tension = GetValueFromAddress(processHandle, base + self.tension_offset, isFloat=True)
             self.burst = GetValueFromAddress(processHandle, base + self.burst_offset, isFloat=True)
+            self.risc = GetValueFromAddress(processHandle, base + self.risc_offset, isFloat=True)
             self.dist = GetValueFromAddress(processHandle, base + self.dist_offset, isFloat=True)
             self.char = GetValueFromAddress(processHandle, base + self.char_offset)
             temp = self.action
+            print(self.player_id)
             self.action = GetValueFromPointer(processHandle, base, str(self.char) + '_p' + str(self.player_id))
             config = configparser.ConfigParser()
             config.read(str(self.char) + '.ini')
@@ -220,14 +222,13 @@ class GameState:
 def main():
     config = configparser.ConfigParser()
     config.read('addresses.ini')
-    p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
-    p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
+    p1_pd = PlayerData(1, config['P1Data']['p1_hp_offset'], config['P1Data']['p1_lives_offset'], config['P1Data']['p1_tension_offset'], config['P1Data']['p1_burst_offset'], config['P1Data']['p1_risc_offset'], config['P1Data']['p1_dist_offset'], config['P1Data']['p1_char_offset'])
+    p2_pd = PlayerData(2, config['P2Data']['p2_hp_offset'], config['P2Data']['p2_lives_offset'], config['P2Data']['p2_tension_offset'], config['P2Data']['p2_burst_offset'], config['P2Data']['p2_risc_offset'], config['P2Data']['p2_dist_offset'], config['P2Data']['p2_char_offset'])
     gamestate = GameState(1)
 
-    
 
     clear = lambda: os.system('cls')
-    pid = getPID()    
+    pid = getPID()
     PROCESS_VM_READ = 0x0010
     processHandle = OpenProcess(PROCESS_VM_READ, False, pid)
     base = ModuleEnumerator.GetModuleAddressByPIDandName(pid, "GGST-Win64-Shipping.exe")
